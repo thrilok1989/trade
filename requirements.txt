@@ -1,21 +1,3 @@
 streamlit
 pandas
-numpy
-scipy
-pytz
-plotly
 requests
-streamlit-autorefresh
-aiohttp
-yfinance
-groq
-supabase
-python-dotenv
-platformdirs
-beautifulsoup4
-lxml
-
-# ML/AI Dependencies
-xgboost>=2.0.3
-scikit-learn>=1.3.2
-joblib>=1.3.2
