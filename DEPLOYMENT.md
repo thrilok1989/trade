@@ -214,7 +214,7 @@ git remote -v
 
 ```txt
 streamlit==1.31.0
-dhanhq==1.3.6
+dhanhq==1.3.3
 pandas==2.1.4
 ```
 
