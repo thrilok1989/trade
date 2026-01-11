@@ -213,9 +213,10 @@ git remote -v
 **Solution**: Check `requirements.txt` has all dependencies
 
 ```txt
-streamlit==1.31.0
+streamlit
 dhanhq==1.3.3
-pandas==2.1.4
+pandas
+requests
 ```
 
 ### Issue: "API authentication failed"
