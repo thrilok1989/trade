@@ -1,25 +1,19 @@
 import streamlit as st
 import pandas as pd
 import requests
+import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import time
-import os
 from st_autorefresh import st_autorefresh
-from dotenv import load_dotenv
-import json
-
-# Load environment variables for local development
-load_dotenv()
 
 ###################################
 # 📌 PAGE CONFIGURATION
 ###################################
 st.set_page_config(
-    page_title="NIFTY HTF S/R Dashboard",
+    page_title="NIFTY S/R Dashboard",
     page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 ###################################
@@ -42,200 +36,240 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         font-weight: bold;
     }
-    .alert-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-        border-left: 5px solid;
-    }
-    .alert-success {
-        background-color: #d1fae5;
-        border-color: #10b981;
-    }
-    .alert-warning {
-        background-color: #fef3c7;
-        border-color: #f59e0b;
-    }
-    .alert-danger {
-        background-color: #fee2e2;
-        border-color: #ef4444;
-    }
     .metric-card {
         background: white;
         padding: 1rem;
         border-radius: 0.5rem;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         border: 1px solid #e5e7eb;
+        margin: 0.5rem 0;
     }
-    .stDataFrame {
+    .alert-box {
+        padding: 1rem;
         border-radius: 0.5rem;
-        overflow: hidden;
+        margin: 1rem 0;
+        border-left: 5px solid #f59e0b;
+        background-color: #fef3c7;
+    }
+    .success-box {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+        border-left: 5px solid #10b981;
+        background-color: #d1fae5;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 ###################################
-# 🚀 LOAD SECRETS / CONFIGURATION
+# 🚀 LOAD SECRETS
 ###################################
-def load_config():
-    """Load configuration from secrets or environment variables"""
-    config = {}
-    
-    try:
-        # Try Streamlit Secrets first
-        if "Dhan" in st.secrets:
-            config["CLIENT_ID"] = st.secrets["Dhan"]["CLIENT_ID"]
-            config["ACCESS_TOKEN"] = st.secrets["Dhan"]["ACCESS_TOKEN"]
-        if "Telegram" in st.secrets:
-            config["BOT_TOKEN"] = st.secrets["Telegram"]["BOT_TOKEN"]
-            config["CHAT_ID"] = st.secrets["Telegram"]["CHAT_ID"]
-    except Exception:
-        # Fallback to environment variables for local development
-        config["CLIENT_ID"] = os.getenv("DHAN_CLIENT_ID", "")
-        config["ACCESS_TOKEN"] = os.getenv("DHAN_ACCESS_TOKEN", "")
-        config["BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        config["CHAT_ID"] = os.getenv("TELEGRAM_CHAT_ID", "")
-    
-    return config
+st.markdown('<h1 class="main-header">📈 NIFTY Support & Resistance Dashboard</h1>', unsafe_allow_html=True)
 
-config = load_config()
+# Initialize session state for alerts history
+if 'alerts_history' not in st.session_state:
+    st.session_state.alerts_history = []
 
-# Check if all required configs are present
-required_configs = ["CLIENT_ID", "ACCESS_TOKEN", "BOT_TOKEN", "CHAT_ID"]
-missing_configs = [cfg for cfg in required_configs if not config.get(cfg)]
-
-if missing_configs:
-    st.error(f"❌ Missing configuration: {', '.join(missing_configs)}")
-    
-    with st.expander("🔧 How to Configure"):
-        st.markdown("""
-        ### For Streamlit Cloud:
-        1. Go to your app's dashboard
-        2. Click on "⋮" (three dots) → "Settings" → "Secrets"
-        3. Add the following:
-        
-        ```toml
-        [Dhan]
-        CLIENT_ID = "your_client_id"
-        ACCESS_TOKEN = "your_access_token"
-        
-        [Telegram]
-        BOT_TOKEN = "your_bot_token"
-        CHAT_ID = "your_chat_id"
-        ```
-        
-        ### For Local Development:
-        Create a `.env` file in the same directory:
-        
-        ```env
-        DHAN_CLIENT_ID=your_client_id
-        DHAN_ACCESS_TOKEN=your_access_token
-        TELEGRAM_BOT_TOKEN=your_bot_token
-        TELEGRAM_CHAT_ID=your_chat_id
-        ```
-        """)
-    st.stop()
-
-###################################
-# 🔌 INITIALIZE DHAN API
-###################################
-def initialize_dhan_api(client_id, access_token):
-    """Initialize Dhan API with proper error handling"""
-    try:
-        # Try multiple import strategies
-        try:
-            from dhanhq import DhanContext, dhanhq
-            dhc = DhanContext(client_id, access_token)
-            api = dhanhq(dhc)
-            st.sidebar.success("✅ Dhan API initialized")
-            return api
-        except ImportError as e:
-            st.error(f"❌ Cannot import dhanhq package: {e}")
-            st.info("""
-            ### Install dhanhq:
-            
-            1. **From GitHub (if available):**
-            ```bash
-            pip install git+https://github.com/dhanhq/dhanhq-python.git
-            ```
-            
-            2. **From local wheel:**
-            - Download the .whl file from Dhan's website
-            - Upload it to your project directory
-            - Install with: `pip install dhanhq-*.whl`
-            ```
-            
-            3. **Use REST API as fallback** (already implemented)
-            """)
-            return None
-    except Exception as e:
-        st.error(f"❌ Failed to initialize Dhan API: {e}")
-        return None
-
-# Initialize API
-api = initialize_dhan_api(config["CLIENT_ID"], config["ACCESS_TOKEN"])
-
-###################################
-# 📊 SIDEBAR CONFIGURATION
-###################################
+# Configuration in sidebar
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/stock-share.png", width=100)
-    st.title("Dashboard Settings")
+    st.title("⚙️ Configuration")
     
+    # API Selection
+    api_source = st.radio(
+        "Data Source:",
+        ["Yahoo Finance (Free)", "Mock Data (Demo)", "Alpha Vantage (API Key Required)"],
+        index=1
+    )
+    
+    if api_source == "Alpha Vantage (API Key Required)":
+        alpha_vantage_key = st.text_input("Alpha Vantage API Key", type="password")
+    elif api_source == "Custom API":
+        custom_api_url = st.text_input("API Endpoint URL")
+        custom_api_key = st.text_input("API Key", type="password")
+    
+    # Telegram Configuration
+    st.subheader("🔔 Telegram Alerts")
+    telegram_enabled = st.checkbox("Enable Telegram Alerts", value=False)
+    
+    if telegram_enabled:
+        bot_token = st.text_input("Bot Token", type="password")
+        chat_id = st.text_input("Chat ID")
+    else:
+        bot_token = ""
+        chat_id = ""
+    
+    # Trading Parameters
     st.subheader("📊 Trading Parameters")
+    nifty_id = st.number_input("NIFTY Symbol", value=26000, help="Use 26000 for NIFTY 50")
     
-    # Security ID Input
-    NIFTY_ID = st.number_input(
-        "NIFTY Security ID",
-        value=26000,
-        min_value=1,
-        max_value=999999,
-        help="Default: 26000 for NIFTY 50"
-    )
-    
-    # Timeframe Selection
-    st.subheader("⏰ Timeframes")
     timeframes = st.multiselect(
-        "Select Timeframes for S/R Calculation",
-        options=["5m", "15m", "30m", "60m", "1d"],
-        default=["5m", "15m", "60m"]
+        "Timeframes",
+        ["5m", "15m", "30m", "60m", "1d", "1wk"],
+        default=["15m", "60m", "1d"]
     )
     
-    # Alert Settings
-    st.subheader("🔔 Alert Settings")
-    threshold_percent = st.slider(
-        "Alert Threshold (%)",
-        min_value=0.1,
-        max_value=5.0,
-        value=0.3,
-        step=0.1,
-        help="Trigger alert when price is within this percentage of S/R level"
-    )
+    threshold = st.slider("Alert Threshold (%)", 0.1, 2.0, 0.5, 0.1)
     
-    # Alert History
-    st.subheader("📜 Alert History")
-    if "alerts_history" not in st.session_state:
-        st.session_state.alerts_history = []
+    # Statistics
+    st.subheader("📈 Stats")
+    st.metric("Refresh Count", refresh_count)
+    st.metric("Current Time", datetime.now().strftime("%H:%M:%S"))
     
-    for alert in st.session_state.alerts_history[-5:]:
-        st.caption(f"🕒 {alert['time']}: {alert['message'][:50]}...")
-    
-    # Clear History
-    if st.button("Clear Alert History"):
-        st.session_state.alerts_history = []
+    if st.button("🔄 Manual Refresh"):
         st.rerun()
-    
-    st.divider()
-    st.caption(f"Last refresh: {datetime.now().strftime('%H:%M:%S')}")
-    st.caption(f"Refresh count: {refresh_count}")
 
 ###################################
-# 🔍 S/R CALCULATION FUNCTIONS
+# 🔍 DATA FETCHING FUNCTIONS
 ###################################
-def calculate_support_resistance(df, method="pivot"):
-    """
-    Calculate support and resistance levels using different methods
-    """
+def fetch_yahoo_data(symbol="^NSEI", interval="1d", period="1mo"):
+    """Fetch data from Yahoo Finance (free API)"""
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {
+            "interval": interval,
+            "range": period,
+            "includePrePost": "false"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if "chart" in data and "result" in data["chart"]:
+            result = data["chart"]["result"][0]
+            timestamps = result["timestamp"]
+            quotes = result["indicators"]["quote"][0]
+            
+            df = pd.DataFrame({
+                "timestamp": pd.to_datetime(timestamps, unit='s'),
+                "open": quotes["open"],
+                "high": quotes["high"],
+                "low": quotes["low"],
+                "close": quotes["close"],
+                "volume": quotes["volume"]
+            })
+            
+            # Remove NaN values
+            df = df.dropna()
+            return df
+        
+        return generate_mock_data(interval)
+        
+    except Exception as e:
+        st.warning(f"Yahoo API error: {e}. Using mock data.")
+        return generate_mock_data(interval)
+
+def fetch_alpha_vantage(symbol="NIFTY", interval="60min", apikey="demo"):
+    """Fetch data from Alpha Vantage"""
+    try:
+        function = "TIME_SERIES_INTRADAY" if interval != "1d" else "TIME_SERIES_DAILY"
+        
+        url = f"https://www.alphavantage.co/query"
+        params = {
+            "function": function,
+            "symbol": "NSE:NIFTY",
+            "interval": interval.replace("m", "min") if "m" in interval else "daily",
+            "apikey": apikey,
+            "outputsize": "compact"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        # Parse Alpha Vantage response
+        if "Time Series" in data:
+            time_key = list(data["Time Series"].keys())[0]
+            df = pd.DataFrame.from_dict(data["Time Series"], orient='index')
+            df.index = pd.to_datetime(df.index)
+            df.columns = ["open", "high", "low", "close", "volume"]
+            df = df.astype(float)
+            df = df.sort_index()
+            
+            # Reset index to have timestamp column
+            df = df.reset_index().rename(columns={"index": "timestamp"})
+            return df
+        
+        return generate_mock_data(interval)
+        
+    except Exception as e:
+        st.warning(f"Alpha Vantage error: {e}. Using mock data.")
+        return generate_mock_data(interval)
+
+def generate_mock_data(timeframe):
+    """Generate realistic mock data for demonstration"""
+    np.random.seed(42)
+    
+    # Determine number of periods based on timeframe
+    periods_map = {
+        "5m": 288,   # 24 hours in 5-min intervals
+        "15m": 96,   # 24 hours in 15-min intervals
+        "30m": 48,   # 24 hours in 30-min intervals
+        "60m": 24,   # 24 hours
+        "1d": 30,    # 30 days
+        "1wk": 12,   # 12 weeks
+    }
+    
+    n_periods = periods_map.get(timeframe, 100)
+    base_price = 22000
+    
+    # Generate timestamps
+    if "m" in timeframe:
+        freq = timeframe.replace("m", "T")
+        dates = pd.date_range(end=datetime.now(), periods=n_periods, freq=freq)
+    else:
+        freq = timeframe.replace("1", "D").replace("wk", "W")
+        dates = pd.date_range(end=datetime.now(), periods=n_periods, freq=freq)
+    
+    # Generate realistic price movement
+    returns = np.random.normal(0, 0.005, n_periods)
+    prices = base_price * np.exp(np.cumsum(returns))
+    
+    # Generate OHLC with some randomness
+    df = pd.DataFrame({
+        "timestamp": dates,
+        "open": prices * (1 + np.random.normal(0, 0.001, n_periods)),
+        "high": prices * (1 + np.abs(np.random.normal(0.002, 0.002, n_periods))),
+        "low": prices * (1 - np.abs(np.random.normal(0.002, 0.002, n_periods))),
+        "close": prices,
+        "volume": np.random.randint(1000, 100000, n_periods)
+    })
+    
+    # Ensure high > low and high > close, low < close
+    df["high"] = df[["open", "close", "high"]].max(axis=1) * 1.001
+    df["low"] = df[["open", "close", "low"]].min(axis=1) * 0.999
+    
+    return df
+
+def get_ohlc_data(timeframe, source="mock"):
+    """Main function to get OHLC data from selected source"""
+    if source == "Yahoo Finance (Free)":
+        interval_map = {
+            "5m": "5m", "15m": "15m", "30m": "30m",
+            "60m": "60m", "1d": "1d", "1wk": "1wk"
+        }
+        period_map = {
+            "5m": "1d", "15m": "5d", "30m": "5d",
+            "60m": "1mo", "1d": "3mo", "1wk": "1y"
+        }
+        return fetch_yahoo_data("^NSEI", interval_map.get(timeframe, "1d"), period_map.get(timeframe, "1mo"))
+    
+    elif source == "Alpha Vantage (API Key Required)":
+        if 'alpha_vantage_key' in locals() and alpha_vantage_key:
+            return fetch_alpha_vantage("NIFTY", timeframe, alpha_vantage_key)
+        else:
+            st.warning("Please enter Alpha Vantage API Key")
+            return generate_mock_data(timeframe)
+    
+    else:  # Mock Data
+        return generate_mock_data(timeframe)
+
+###################################
+# 📊 S/R CALCULATION FUNCTIONS
+###################################
+def calculate_pivot_points(df):
+    """Calculate standard pivot points"""
     if df.empty or len(df) < 2:
         return {}
     
@@ -243,230 +277,120 @@ def calculate_support_resistance(df, method="pivot"):
     low = df["low"].min()
     close = df["close"].iloc[-1]
     
-    if method == "pivot":
-        # Standard Pivot Point method
-        PP = (high + low + close) / 3
-        S1 = (2 * PP) - high
-        R1 = (2 * PP) - low
-        S2 = PP - (high - low)
-        R2 = PP + (high - low)
-        
-        levels = {
-            "Pivot": PP,
-            "S1": S1,
-            "S2": S2,
-            "R1": R1,
-            "R2": R2
-        }
+    pp = (high + low + close) / 3
+    r1 = (2 * pp) - low
+    s1 = (2 * pp) - high
+    r2 = pp + (high - low)
+    s2 = pp - (high - low)
+    r3 = high + 2 * (pp - low)
+    s3 = low - 2 * (high - pp)
     
-    elif method == "fibonacci":
-        # Fibonacci Retracement levels
-        diff = high - low
-        PP = (high + low + close) / 3
-        
-        levels = {
-            "Pivot": PP,
-            "S1": high - 0.236 * diff,  # 23.6%
-            "S2": high - 0.382 * diff,  # 38.2%
-            "S3": high - 0.5 * diff,    # 50%
-            "S4": high - 0.618 * diff,  # 61.8%
-            "R1": low + 0.236 * diff,   # 23.6%
-            "R2": low + 0.382 * diff,   # 38.2%
-            "R3": low + 0.5 * diff,     # 50%
-            "R4": low + 0.618 * diff,   # 61.8%
-        }
-    
-    elif method == "camarilla":
-        # Camarilla Pivot Points
-        PP = (high + low + close) / 3
-        range_val = high - low
-        
-        levels = {
-            "Pivot": PP,
-            "S1": close - range_val * 1.1/12,
-            "S2": close - range_val * 1.1/6,
-            "S3": close - range_val * 1.1/4,
-            "S4": close - range_val * 1.1/2,
-            "R1": close + range_val * 1.1/12,
-            "R2": close + range_val * 1.1/6,
-            "R3": close + range_val * 1.1/4,
-            "R4": close + range_val * 1.1/2,
-        }
-    
-    else:
-        levels = {}
-    
-    return levels
-
-def fetch_ohlc_data(security_id, timeframe, api_type="dhan"):
-    """
-    Fetch OHLC data from different sources
-    """
-    try:
-        if api_type == "dhan" and api is not None:
-            # Use Dhan API
-            df = api.fetch_historical_candles(
-                security_id=str(security_id),
-                interval=timeframe
-            )
-            
-            if isinstance(df, dict) and "candles" in df:
-                candles = df["candles"]
-                if len(candles) > 0:
-                    df = pd.DataFrame(candles)
-                    if len(df.columns) >= 6:
-                        df.columns = ["timestamp", "open", "high", "low", "close", "volume"][:len(df.columns)]
-                        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-                        return df
-        
-        # Fallback: Generate mock data for demonstration
-        st.warning(f"⚠️ Using mock data for {timeframe} (API unavailable)")
-        return generate_mock_data(timeframe)
-        
-    except Exception as e:
-        st.error(f"Error fetching {timeframe} data: {e}")
-        return generate_mock_data(timeframe)
-
-def generate_mock_data(timeframe):
-    """Generate mock OHLC data for demonstration"""
-    periods = {
-        "5m": 288,   # 24 hours / 5 minutes
-        "15m": 96,   # 24 hours / 15 minutes
-        "30m": 48,   # 24 hours / 30 minutes
-        "60m": 24,   # 24 hours
-        "1d": 30,    # 30 days
+    return {
+        "Pivot": pp,
+        "S1": s1, "S2": s2, "S3": s3,
+        "R1": r1, "R2": r2, "R3": r3
     }
+
+def calculate_fibonacci_levels(df):
+    """Calculate Fibonacci retracement levels"""
+    if df.empty or len(df) < 2:
+        return {}
     
-    n_periods = periods.get(timeframe, 100)
-    base_price = 22000
+    high = df["high"].max()
+    low = df["low"].min()
+    diff = high - low
     
-    dates = pd.date_range(end=datetime.now(), periods=n_periods, freq=timeframe.replace("m", "T") if "m" in timeframe else "D")
-    
-    np.random.seed(42)
-    returns = np.random.randn(n_periods) * 0.005
-    
-    prices = base_price * np.exp(np.cumsum(returns))
-    
-    df = pd.DataFrame({
-        "timestamp": dates,
-        "open": prices * 0.998,
-        "high": prices * 1.005,
-        "low": prices * 0.995,
-        "close": prices,
-        "volume": np.random.randint(1000, 10000, n_periods)
-    })
-    
-    return df
+    return {
+        "0% (High)": high,
+        "23.6%": high - 0.236 * diff,
+        "38.2%": high - 0.382 * diff,
+        "50%": high - 0.5 * diff,
+        "61.8%": high - 0.618 * diff,
+        "100% (Low)": low
+    }
 
 ###################################
-# 🔔 TELEGRAM ALERT FUNCTIONS
+# 🔔 ALERT FUNCTIONS
 ###################################
-def send_telegram_alert(message, bot_token, chat_id):
-    """Send alert to Telegram channel"""
+def send_telegram_message(bot_token, chat_id, message):
+    """Send message to Telegram"""
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        
         payload = {
             "chat_id": chat_id,
             "text": message,
-            "parse_mode": "HTML",
-            "disable_notification": False
+            "parse_mode": "HTML"
         }
-        
-        response = requests.post(url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            # Log the alert
-            alert_entry = {
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "message": message,
-                "status": "sent"
-            }
-            st.session_state.alerts_history.append(alert_entry)
-            return True
-        else:
-            st.error(f"Telegram API error: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        st.error(f"Failed to send Telegram alert: {e}")
+        response = requests.post(url, json=payload, timeout=5)
+        return response.status_code == 200
+    except:
         return False
 
-def format_alert_message(current_price, alerts_data, timeframe_levels):
-    """Format alert message for Telegram"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def check_alerts(current_price, sr_levels, threshold_percent):
+    """Check if current price is near any S/R levels"""
+    alerts = []
     
-    message = f"🚨 <b>NIFTY ALERT</b> 🚨\n"
-    message += f"⏰ {timestamp}\n"
-    message += f"💰 Current Price: <b>{current_price:.2f}</b>\n"
-    message += f"📊 Nearby Levels: {len(alerts_data)}\n\n"
-    
-    for alert in alerts_data:
-        direction_emoji = "⬆️" if alert['direction'] == "ABOVE" else "⬇️"
-        message += f"{direction_emoji} <b>{alert['timeframe']} {alert['level']}</b>\n"
-        message += f"   Level: {alert['value']:.2f}\n"
-        message += f"   Distance: {alert['distance']:.2f} ({alert['distance_pct']:.2f}%)\n\n"
-    
-    message += "📈 <b>Current S/R Levels:</b>\n"
-    for tf, levels in timeframe_levels.items():
-        message += f"\n{tf}:\n"
+    for tf_name, levels in sr_levels.items():
         for level_name, level_value in levels.items():
-            if level_name.startswith("S"):
-                message += f"  {level_name}: {level_value:.2f}\n"
-        for level_name, level_value in levels.items():
-            if level_name.startswith("R"):
-                message += f"  {level_name}: {level_value:.2f}\n"
+            if isinstance(level_value, (int, float)):
+                distance_pct = abs(current_price - level_value) / current_price * 100
+                if distance_pct <= threshold_percent:
+                    alerts.append({
+                        "timeframe": tf_name,
+                        "level": level_name,
+                        "value": level_value,
+                        "current_price": current_price,
+                        "distance_pct": distance_pct,
+                        "direction": "ABOVE" if current_price > level_value else "BELOW"
+                    })
     
-    message += "\n🔔 Auto-generated by NIFTY S/R Dashboard"
-    
-    return message
+    return alerts
 
 ###################################
-# 📈 VISUALIZATION FUNCTIONS
+# 📈 CHART FUNCTIONS
 ###################################
-def create_price_chart(price_data, sr_levels):
-    """Create interactive price chart with S/R levels"""
+def create_price_chart(df, sr_levels=None, timeframe="1d"):
+    """Create interactive price chart"""
     fig = go.Figure()
     
-    # Add candlestick chart
+    # Add candlestick
     fig.add_trace(go.Candlestick(
-        x=price_data['timestamp'],
-        open=price_data['open'],
-        high=price_data['high'],
-        low=price_data['low'],
-        close=price_data['close'],
-        name="Price",
-        increasing_line_color='#26a69a',
-        decreasing_line_color='#ef5350'
+        x=df['timestamp'],
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        name='Price'
     ))
     
-    # Add S/R levels as horizontal lines
-    colors = {
-        'S1': '#ef4444', 'S2': '#dc2626', 'S3': '#b91c1c',
-        'R1': '#10b981', 'R2': '#059669', 'R3': '#047857',
-        'Pivot': '#6b7280'
-    }
-    
-    for level_name, level_value in sr_levels.items():
-        if level_name in colors:
-            fig.add_hline(
-                y=level_value,
-                line_dash="dash",
-                line_color=colors[level_name],
-                annotation_text=level_name,
-                annotation_position="right",
-                opacity=0.7
-            )
+    # Add S/R levels if provided
+    if sr_levels:
+        colors = {
+            'S1': '#ef4444', 'S2': '#dc2626', 'S3': '#b91c1c',
+            'R1': '#10b981', 'R2': '#059669', 'R3': '#047857',
+            'Pivot': '#6b7280'
+        }
+        
+        for level_name, level_value in sr_levels.items():
+            if level_name in colors:
+                fig.add_hline(
+                    y=level_value,
+                    line_dash="dash",
+                    line_color=colors[level_name],
+                    annotation_text=level_name,
+                    annotation_position="right",
+                    opacity=0.6
+                )
     
     # Update layout
     fig.update_layout(
-        title="NIFTY Price with S/R Levels",
+        title=f"NIFTY Price Chart ({timeframe})",
         yaxis_title="Price",
         xaxis_title="Time",
         template="plotly_white",
         height=500,
-        showlegend=True,
-        xaxis_rangeslider_visible=False
+        xaxis_rangeslider_visible=False,
+        showlegend=True
     )
     
     return fig
@@ -474,289 +398,243 @@ def create_price_chart(price_data, sr_levels):
 ###################################
 # 🎯 MAIN DASHBOARD
 ###################################
-st.markdown('<h1 class="main-header">📈 NIFTY HTF Support & Resistance Dashboard</h1>', unsafe_allow_html=True)
-
-# Tabs for different views
-tab1, tab2, tab3 = st.tabs(["📊 S/R Levels", "📈 Price Chart", "⚙️ Configuration"])
+# Create tabs
+tab1, tab2, tab3 = st.tabs(["📊 S/R Dashboard", "📈 Price Charts", "⚙️ Settings & Info"])
 
 with tab1:
-    col1, col2 = st.columns([3, 1])
+    # Fetch and calculate S/R levels
+    sr_data = {}
+    current_price = 22150.75  # Mock current price
     
-    with col1:
-        st.subheader("🧠 Support & Resistance Levels")
-        
-        # Progress bar for data loading
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Fetch and calculate S/R levels for each timeframe
-        htf_levels = {}
-        alerts_data = []
-        
-        for idx, timeframe in enumerate(timeframes):
-            progress = (idx + 1) / len(timeframes)
-            progress_bar.progress(progress)
-            status_text.text(f"Loading {timeframe} data...")
-            
-            # Fetch OHLC data
-            df_tf = fetch_ohlc_data(NIFTY_ID, timeframe)
-            
-            if not df_tf.empty:
-                # Calculate S/R levels
-                levels = calculate_support_resistance(df_tf, method="pivot")
-                if levels:
-                    htf_levels[timeframe] = levels
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        # Display S/R levels table
-        if htf_levels:
-            df_table = pd.DataFrame(htf_levels).T
-            
-            # Style the DataFrame
-            def color_support_resistance(val):
-                if isinstance(val, (int, float)):
-                    if 'S' in col:
-                        return f"color: #ef4444; font-weight: bold"
-                    elif 'R' in col:
-                        return f"color: #10b981; font-weight: bold"
-                    elif 'Pivot' in col:
-                        return f"color: #6b7280; font-weight: bold"
-                return ""
-            
-            # Apply styling
-            styled_df = df_table.style.format("{:.2f}").applymap(
-                color_support_resistance,
-                subset=pd.IndexSlice[:, df_table.columns]
-            )
-            
-            st.dataframe(styled_df, use_container_width=True)
-            
-            # Current Price and Alerts
-            try:
-                # Try to get current price (mock for demonstration)
-                current_price = 22150.75  # Mock price
-                
-                st.markdown("---")
-                col_price, col_alerts = st.columns(2)
-                
-                with col_price:
-                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                    st.metric(
-                        label="📍 Current NIFTY Price",
-                        value=f"₹{current_price:,.2f}",
-                        delta="+125.50 (+0.57%)"
-                    )
-                    st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                with col_alerts:
-                    # Check for alerts
-                    for tf, levels in htf_levels.items():
-                        for level_name, level_value in levels.items():
-                            distance = abs(current_price - level_value)
-                            distance_pct = (distance / current_price) * 100
-                            
-                            if distance_pct <= threshold_percent:
-                                alert_info = {
-                                    'timeframe': tf,
-                                    'level': level_name,
-                                    'value': level_value,
-                                    'distance': distance,
-                                    'distance_pct': distance_pct,
-                                    'direction': "ABOVE" if current_price > level_value else "BELOW"
-                                }
-                                alerts_data.append(alert_info)
-                    
-                    if alerts_data:
-                        st.markdown('<div class="alert-box alert-warning">', unsafe_allow_html=True)
-                        st.warning(f"⚠️ {len(alerts_data)} Alert(s) Triggered!")
-                        
-                        for alert in alerts_data:
-                            st.markdown(f"""
-                            **{alert['timeframe']} {alert['level']}**
-                            - Level: ₹{alert['value']:.2f}
-                            - Price is {alert['direction']} by ₹{alert['distance']:.2f}
-                            - Distance: {alert['distance_pct']:.2f}%
-                            """)
-                        
-                        # Send alert button
-                        if st.button("📨 Send Telegram Alert", type="primary", key="send_alert"):
-                            alert_message = format_alert_message(current_price, alerts_data, htf_levels)
-                            if send_telegram_alert(alert_message, config["BOT_TOKEN"], config["CHAT_ID"]):
-                                st.success("✅ Alert sent to Telegram!")
-                            else:
-                                st.error("❌ Failed to send alert")
-                        
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<div class="alert-box alert-success">', unsafe_allow_html=True)
-                        st.success("✅ No alerts triggered")
-                        st.caption(f"Price is not within {threshold_percent}% of any S/R level")
-                        st.markdown('</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"Error processing price data: {e}")
-        
-        else:
-            st.warning("No S/R levels calculated. Please check your connection and try again.")
-        
-        # Download data button
-        if htf_levels:
-            csv_data = pd.DataFrame(htf_levels).T.to_csv()
-            st.download_button(
-                label="📥 Download S/R Levels (CSV)",
-                data=csv_data,
-                file_name=f"nifty_sr_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv"
-            )
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    with col2:
-        st.subheader("📊 Quick Stats")
+    for idx, tf in enumerate(timeframes):
+        progress = (idx + 1) / len(timeframes)
+        progress_bar.progress(progress)
+        status_text.text(f"Fetching {tf} data...")
         
-        # Statistics cards
-        stats_col1, stats_col2 = st.columns(2)
+        # Get data
+        df = get_ohlc_data(tf, api_source)
         
-        with stats_col1:
+        if not df.empty:
+            # Calculate both pivot and fibonacci levels
+            pivot_levels = calculate_pivot_points(df)
+            fib_levels = calculate_fibonacci_levels(df)
+            
+            sr_data[tf] = {
+                **pivot_levels,
+                **{f"F_{k}": v for k, v in fib_levels.items()}
+            }
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    # Display S/R Levels
+    if sr_data:
+        # Convert to DataFrame for display
+        display_data = {}
+        for tf, levels in sr_data.items():
+            # Filter to show only key levels for cleaner display
+            key_levels = {}
+            for k, v in levels.items():
+                if k in ["Pivot", "S1", "S2", "S3", "R1", "R2", "R3"] or "50%" in str(k):
+                    key_levels[k] = v
+            display_data[tf] = key_levels
+        
+        df_sr = pd.DataFrame(display_data).T
+        
+        # Format and style
+        st.subheader("Support & Resistance Levels")
+        
+        def color_level(val):
+            if isinstance(val, (int, float)):
+                if 'S' in col:
+                    return 'color: #dc2626; font-weight: bold'
+                elif 'R' in col:
+                    return 'color: #059669; font-weight: bold'
+                elif 'Pivot' in col:
+                    return 'color: #6b7280; font-weight: bold'
+                elif '%' in col:
+                    return 'color: #7c3aed; font-weight: bold'
+            return ''
+        
+        styled_df = df_sr.style.format("{:.2f}").applymap(
+            color_level,
+            subset=pd.IndexSlice[:, df_sr.columns]
+        )
+        
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Current Price and Alerts
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-            st.metric("Timeframes", len(timeframes))
+            st.metric(
+                "📍 Current NIFTY Price",
+                f"₹{current_price:,.2f}",
+                delta="+125.50 (+0.57%)"
+            )
+            st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
             st.markdown('</div>', unsafe_allow_html=True)
         
-        with stats_col2:
-            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-            st.metric("S/R Levels", len(htf_levels) * 5 if htf_levels else 0)
-            st.markdown('</div>', unsafe_allow_html=True)
+        with col2:
+            # Check for alerts
+            alerts = check_alerts(current_price, sr_data, threshold)
+            
+            if alerts:
+                st.markdown('<div class="alert-box">', unsafe_allow_html=True)
+                st.warning(f"⚠️ {len(alerts)} Alert(s) Triggered!")
+                
+                for alert in alerts[:3]:  # Show first 3 alerts
+                    st.write(f"**{alert['timeframe']} {alert['level']}**")
+                    st.write(f"Level: ₹{alert['value']:.2f}")
+                    st.write(f"Price is {alert['direction']} by {alert['distance_pct']:.2f}%")
+                
+                if telegram_enabled and bot_token and chat_id:
+                    if st.button("📨 Send Telegram Alert", type="primary"):
+                        alert_msg = f"🚨 NIFTY Alert!\nPrice: ₹{current_price:.2f}\n"
+                        alert_msg += f"Near: {alerts[0]['timeframe']} {alerts[0]['level']}\n"
+                        alert_msg += f"Level: ₹{alerts[0]['value']:.2f}"
+                        
+                        if send_telegram_message(bot_token, chat_id, alert_msg):
+                            st.success("Alert sent!")
+                            # Log alert
+                            st.session_state.alerts_history.append({
+                                "time": datetime.now().strftime("%H:%M:%S"),
+                                "message": alert_msg
+                            })
+                        else:
+                            st.error("Failed to send alert")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="success-box">', unsafe_allow_html=True)
+                st.success("✅ No alerts triggered")
+                st.caption(f"Threshold: {threshold}%")
+                st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Alert Threshold", f"{threshold_percent}%")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Total Alerts", len(st.session_state.alerts_history))
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Refresh info
-        st.info(f"""
-        **Auto-refresh:** Every 2 minutes
-        **Next refresh:** In {(120000 - (time.time() * 1000) % 120000) / 1000:.0f} seconds
-        **Refresh count:** {refresh_count}
-        """)
+        # Download button
+        csv = df_sr.to_csv()
+        st.download_button(
+            label="📥 Download S/R Levels (CSV)",
+            data=csv,
+            file_name=f"nifty_sr_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
+    
+    else:
+        st.warning("No data available. Please check your settings.")
 
 with tab2:
-    st.subheader("📈 Interactive Price Chart")
+    st.subheader("Interactive Price Charts")
     
-    if htf_levels and '60m' in htf_levels:
-        # Get hourly data for the chart
-        hourly_data = fetch_ohlc_data(NIFTY_ID, "60m")
+    # Chart timeframe selector
+    chart_tf = st.selectbox("Select timeframe for chart:", timeframes, index=0)
+    
+    # Get data for chart
+    chart_data = get_ohlc_data(chart_tf, api_source)
+    
+    if not chart_data.empty:
+        # Calculate S/R for this timeframe
+        pivot_levels = calculate_pivot_points(chart_data)
         
-        if not hourly_data.empty:
-            fig = create_price_chart(hourly_data, htf_levels['60m'])
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Chart controls
-            col_chart1, col_chart2, col_chart3 = st.columns(3)
-            with col_chart1:
-                show_volume = st.checkbox("Show Volume", value=False)
-            with col_chart2:
-                chart_type = st.selectbox("Chart Type", ["Candlestick", "Line", "OHLC"])
-            with col_chart3:
-                st.download_button(
-                    "📥 Download Chart Data",
-                    hourly_data.to_csv(),
-                    "nifty_hourly_data.csv"
-                )
-        else:
-            st.warning("No price data available for chart")
+        # Create chart
+        fig = create_price_chart(chart_data, pivot_levels, chart_tf)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Chart statistics
+        col_stats1, col_stats2, col_stats3 = st.columns(3)
+        with col_stats1:
+            st.metric("Open", f"₹{chart_data['open'].iloc[-1]:,.2f}")
+        with col_stats2:
+            st.metric("High", f"₹{chart_data['high'].max():,.2f}")
+        with col_stats3:
+            st.metric("Low", f"₹{chart_data['low'].min():,.2f}")
+        
+        # Raw data viewer
+        with st.expander("View Raw Data"):
+            st.dataframe(chart_data.tail(20))
+    
     else:
-        st.info("Please load S/R data first from the main tab")
+        st.info("No chart data available")
 
 with tab3:
-    st.subheader("⚙️ Application Configuration")
+    st.subheader("Application Information")
     
-    col_config1, col_config2 = st.columns(2)
+    col_info1, col_info2 = st.columns(2)
     
-    with col_config1:
-        st.markdown("### API Status")
+    with col_info1:
+        st.markdown("""
+        ### 📋 How to Use
         
-        # API status indicators
-        api_status = "✅ Connected" if api is not None else "❌ Disconnected"
-        st.markdown(f"**Dhan API:** {api_status}")
+        1. **Configure Data Source** in sidebar
+        2. **Select Timeframes** for S/R calculation
+        3. **Set Alert Threshold** for notifications
+        4. **Enable Telegram** for real-time alerts
+        5. **Monitor** S/R levels and price action
         
-        # Test Telegram connection
-        if st.button("Test Telegram Connection"):
-            test_message = f"✅ NIFTY S/R Dashboard Test - {datetime.now().strftime('%H:%M:%S')}"
-            if send_telegram_alert(test_message, config["BOT_TOKEN"], config["CHAT_ID"]):
-                st.success("Telegram connection successful!")
-            else:
-                st.error("Telegram connection failed")
+        ### 🔔 Alert System
         
-        # Data source selection
-        st.markdown("### Data Source")
-        data_source = st.radio(
-            "Select data source:",
-            ["Dhan API (Real-time)", "Mock Data (Demo)"],
-            index=1 if api is None else 0
-        )
-    
-    with col_config2:
-        st.markdown("### Alert Preferences")
+        Alerts trigger when price approaches:
+        - Support/Resistance levels
+        - Pivot points
+        - Fibonacci levels
         
-        # Alert methods
-        alert_methods = st.multiselect(
-            "Notification Methods:",
-            ["Telegram", "Browser Notification", "Email"],
-            default=["Telegram"]
-        )
+        Threshold: Price within X% of level
+        """)
+    
+    with col_info2:
+        st.markdown("""
+        ### 📊 Data Sources
         
-        # Alert frequency
-        alert_frequency = st.selectbox(
-            "Alert Frequency:",
-            ["Immediate", "Every 5 minutes", "Every 15 minutes", "Only once per level"]
-        )
+        **1. Yahoo Finance (Free)**
+        - Real NIFTY data
+        - No API key required
+        - Limited historical data
         
-        # Sound alerts
-        sound_alerts = st.checkbox("Enable sound alerts", value=True)
+        **2. Alpha Vantage**
+        - Real-time data
+        - API key required (free tier available)
+        - More comprehensive data
+        
+        **3. Mock Data**
+        - For demonstration
+        - Realistic price patterns
+        - No API required
+        """)
     
-    st.markdown("---")
-    st.subheader("📋 System Information")
-    
-    sys_col1, sys_col2, sys_col3 = st.columns(3)
-    
-    with sys_col1:
-        st.metric("Python Version", "3.9+")
-        st.metric("Streamlit Version", "1.28.0")
-    
-    with sys_col2:
-        st.metric("Pandas Version", "2.1.0")
-        st.metric("Last Updated", datetime.now().strftime("%Y-%m-%d"))
-    
-    with sys_col3:
-        st.metric("Uptime", "24/7")
-        if st.button("🔄 Restart App"):
+    # Alert History
+    st.subheader("📜 Alert History")
+    if st.session_state.alerts_history:
+        for alert in reversed(st.session_state.alerts_history[-10:]):
+            st.caption(f"🕒 {alert['time']}: {alert['message']}")
+        
+        if st.button("Clear History"):
+            st.session_state.alerts_history = []
             st.rerun()
+    else:
+        st.info("No alerts sent yet")
+    
+    # System Info
+    st.subheader("🖥️ System Information")
+    col_sys1, col_sys2 = st.columns(2)
+    
+    with col_sys1:
+        st.metric("Python Version", "3.9+")
+        st.metric("Streamlit Version", st.__version__)
+    
+    with col_sys2:
+        st.metric("Last Refresh", datetime.now().strftime("%H:%M:%S"))
+        st.metric("Refresh Count", refresh_count)
 
 ###################################
 # 📱 FOOTER
 ###################################
 st.markdown("---")
-footer_col1, footer_col2, footer_col3 = st.columns(3)
-
-with footer_col1:
-    st.caption("📧 Support: support@tradingapp.com")
-    st.caption("🔒 Data is encrypted and secure")
-
-with footer_col2:
-    st.caption("🔄 Auto-refresh: Every 2 minutes")
-    st.caption(f"⏰ Last refresh: {datetime.now().strftime('%H:%M:%S')}")
-
-with footer_col3:
-    st.caption("⚠️ For educational purposes only")
-    st.caption("📈 Trade at your own risk")
-
-# Manual refresh button
-if st.button("🔄 Manual Refresh Now", type="secondary", use_container_width=True):
-    st.rerun()
-
-# Add numpy import if using mock data
-import numpy as np
+st.caption(f"""
+📈 NIFTY Support & Resistance Dashboard • Version 2.0 • 
+Auto-refresh every 2 minutes • Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+""")
+st.caption("⚠️ This is for educational purposes only. Trading involves risk.")
